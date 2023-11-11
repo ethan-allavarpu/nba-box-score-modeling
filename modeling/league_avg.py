@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
 def data_loader(seasons):
     nba_df = sportsdataverse.nba.load_nba_player_boxscore(seasons=seasons)
     nba_df = nba_df.to_pandas()
@@ -62,13 +65,13 @@ def fit_and_summarize_arima(league_game_df, metric, order):
     """
 
     # Plot ACF and PACF
-    plt.figure(figsize=(14, 7))
+    plt.figure(figsize=(7, 7))
     plot_acf(league_game_df[metric], ax=plt.gca(), lags=40)
     plt.title('Autocorrelation Function (ACF)')
     plt.savefig(f"plots/acf_{metric}.png")
 
 
-    plt.figure(figsize=(14, 7))
+    plt.figure(figsize=(7, 7))
     plot_pacf(league_game_df[metric], ax=plt.gca(), lags=40, method='ywm')
     plt.title('Partial Autocorrelation Function (PACF)')
     plt.savefig(f"plots/pacf_{metric}.png")
@@ -127,7 +130,7 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_sea
 
     # Fit and summarize the ARIMA model
     train_league_df = league_game_df[league_game_df['season'].isin(train_seasons)]
-    fit_and_summarize_arima(train_league_df, metric=metric, order=(4, 0, 1))
+    fit_and_summarize_arima(train_league_df, metric=metric, order=(4, 0, 0))
 
     # Store predictions in a dictionary
     predictions = {}
@@ -135,7 +138,7 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_sea
     unique_dates = league_game_df[league_game_df['season'].isin(test_seasons)]['game_date'].unique()
     for i in range(len(unique_dates) - 1):
         prediction_date = unique_dates[i + 1]  # We predict the next day
-        predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric, order=(4, 0, 2))
+        predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric, order=(4, 0, 0))
 
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{metric}'])
     predictions_df = predictions_df.merge(league_game_df[['game_date', metric]], on='game_date', how='inner')
@@ -162,14 +165,14 @@ def player_main(athlete_id,  train_seasons=range(2016, 2018), test_seasons=range
     # delta between player and league average
     df[f"{athlete_name}_{metric}_delta"] = df[metric] - df[f'predicted_league_avg_{metric}']
 
-    fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta", order=(1, 0, 1))
+    fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta", order=(4, 0, 0))
 
     # Now fit the model and make predictions
     predictions = {}
     unique_dates = df[df['season'].isin(test_seasons)]['game_date'].unique()
     for i in range(len(unique_dates) - 1):
         prediction_date = unique_dates[i + 1]  # We predict the next day
-        predictions[prediction_date] = fit_and_forecast(df, prediction_date, metric=f"{athlete_name}_{metric}_delta", order=(1, 0, 1))
+        predictions[prediction_date] = fit_and_forecast(df, prediction_date, metric=f"{athlete_name}_{metric}_delta", order=(4, 0, 0))
     
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{athlete_name}_{metric}_delta'])
     predictions_df = predictions_df.merge(league_game_df, on='game_date', how='inner')
