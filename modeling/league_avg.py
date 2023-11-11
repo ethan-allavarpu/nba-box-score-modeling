@@ -53,7 +53,7 @@ def preprocess_data(seasons):
     
     return league_game_df
 
-def fit_and_summarize_arima(league_game_df, metric):
+def fit_and_summarize_arima(league_game_df, metric, order):
     """
     Fit ARIMA model to the entire dataset and provide a summary, including ACF and PACF plots.
 
@@ -65,13 +65,13 @@ def fit_and_summarize_arima(league_game_df, metric):
     plt.figure(figsize=(14, 7))
     plot_acf(league_game_df[metric], ax=plt.gca(), lags=40)
     plt.title('Autocorrelation Function (ACF)')
-    plt.savefig(f"acf_{metric}.png")
+    plt.savefig(f"plots/acf_{metric}.png")
 
 
     plt.figure(figsize=(14, 7))
     plot_pacf(league_game_df[metric], ax=plt.gca(), lags=40, method='ywm')
     plt.title('Partial Autocorrelation Function (PACF)')
-    plt.savefig(f"pacf_{metric}.png")
+    plt.savefig(f"plots/pacf_{metric}.png")
 
     # Fit the ARIMA model
     exog_df = league_game_df[['days_since_last_game', 'season_type']]
@@ -80,7 +80,7 @@ def fit_and_summarize_arima(league_game_df, metric):
     arima_model = ARIMA(
         endog=league_game_df[metric], 
         exog=exog_df, 
-        order=(5, 0, 0)
+        order=order
     )
     arima_model_fit = arima_model.fit()
 
@@ -88,7 +88,7 @@ def fit_and_summarize_arima(league_game_df, metric):
     print(arima_model_fit.summary())
 
 # Function to fit ARIMA model and make one-day out-of-sample forecast
-def fit_and_forecast(league_game_df, prediction_date, metric):
+def fit_and_forecast(league_game_df, prediction_date, metric, order):
     """
     Fit ARIMA model to data up to a specified date and make a one-day out-of-sample forecast.
 
@@ -109,39 +109,40 @@ def fit_and_forecast(league_game_df, prediction_date, metric):
     arima_model = ARIMA(
         endog=fit_df[metric], 
         exog=exog_df, 
-        order=(5, 0, 0)
+        order=order
     )
     arima_model_fit = arima_model.fit()
 
     # Make forecast for the prediction_date
     exog_forecast = league_game_df[league_game_df['game_date'] == prediction_date][['days_since_last_game', 'season_type']]
+    exog_forecast = exog_forecast.loc[:, exog_df.columns]
     forecast = arima_model_fit.forecast(steps=1, exog=exog_forecast)
 
     return forecast.iloc[0]
 
-def main(metric='league_avg_fg3a_fga'):
-    seasons = range(2014, 2019)
+def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_seasons=range(2016, 2020)):
 
     # Preprocess the data
-    league_game_df = preprocess_data(seasons)
+    league_game_df = preprocess_data(seasons=list(train_seasons) + list(test_seasons))
 
     # Fit and summarize the ARIMA model
-    fit_and_summarize_arima(league_game_df, metric=metric)
+    train_league_df = league_game_df[league_game_df['season'].isin(train_seasons)]
+    fit_and_summarize_arima(train_league_df, metric=metric, order=(4, 0, 1))
 
     # Store predictions in a dictionary
     predictions = {}
 
-    unique_dates = league_game_df[league_game_df['season'] >= 2016]['game_date'].unique()
+    unique_dates = league_game_df[league_game_df['season'].isin(test_seasons)]['game_date'].unique()
     for i in range(len(unique_dates) - 1):
         prediction_date = unique_dates[i + 1]  # We predict the next day
-        predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric)
+        predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric, order=(4, 0, 1))
 
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{metric}'])
     
     predictions_df.to_csv(f'{metric}_predictions.csv', index=False)
 
-def player_main(athlete_id, seasons, metric='fg3a_fga'):
-    df = data_loader(seasons=seasons)
+def player_main(athlete_id,  train_seasons=range(2016, 2018), test_seasons=range(2018, 2020), metric='fg3a_fga'):
+    df = data_loader(seasons=list(train_seasons) + list(test_seasons))
     # subset the data to the player
     df = df[df['athlete_id'] == athlete_id]
     athlete_name = df["athlete_display_name"].unique()[0]
@@ -160,11 +161,24 @@ def player_main(athlete_id, seasons, metric='fg3a_fga'):
     # delta between player and league average
     df[f"{athlete_name}_{metric}_delta"] = df[metric] - df[f'predicted_league_avg_{metric}']
 
-    fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta")
+    fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta", order=(1, 0, 1))
+
+    # Now fit the model and make predictions
+    predictions = {}
+    unique_dates = df[df['season'].isin(test_seasons)]['game_date'].unique()
+    for i in range(len(unique_dates) - 1):
+        prediction_date = unique_dates[i + 1]  # We predict the next day
+        predictions[prediction_date] = fit_and_forecast(df, prediction_date, metric=f"{athlete_name}_{metric}_delta", order=(1, 0, 1))
+    
+    predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{athlete_name}_{metric}_delta'])
+    predictions_df = predictions_df.merge(league_game_df, on='game_date', how='inner')
+    predictions_df[f"predicted_player_{metric}"] = predictions_df[f'predicted_league_avg_{metric}'] + predictions_df[f'predicted_{athlete_name}_{metric}_delta']
+
+    predictions_df.to_csv(f'{athlete_name}_{metric}_predictions.csv', index=False)
 
 
 
 if __name__ == "__main__":
-   main()
+   # main()
    # brook lopez
-   player_main(3448, range(2014, 2019))
+   player_main(3448)
