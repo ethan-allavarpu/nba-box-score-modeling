@@ -135,9 +135,10 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_sea
     unique_dates = league_game_df[league_game_df['season'].isin(test_seasons)]['game_date'].unique()
     for i in range(len(unique_dates) - 1):
         prediction_date = unique_dates[i + 1]  # We predict the next day
-        predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric, order=(4, 0, 1))
+        predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric, order=(4, 0, 2))
 
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{metric}'])
+    predictions_df = predictions_df.merge(league_game_df[['game_date', metric]], on='game_date', how='inner')
     
     predictions_df.to_csv(f'{metric}_predictions.csv', index=False)
 
@@ -172,6 +173,7 @@ def player_main(athlete_id,  train_seasons=range(2016, 2018), test_seasons=range
     
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{athlete_name}_{metric}_delta'])
     predictions_df = predictions_df.merge(league_game_df, on='game_date', how='inner')
+    predictions_df = predictions_df.merge(df[['game_date', metric]], on='game_date', how='inner')
     predictions_df[f"predicted_player_{metric}"] = predictions_df[f'predicted_league_avg_{metric}'] + predictions_df[f'predicted_{athlete_name}_{metric}_delta']
 
     predictions_df.to_csv(f'{athlete_name}_{metric}_predictions.csv', index=False)
