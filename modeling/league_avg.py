@@ -146,7 +146,7 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_sea
     
     predictions_df.to_csv(f'{metric}_predictions.csv', index=False)
 
-def player_main(athlete_id,  train_seasons=range(2016, 2018), test_seasons=range(2018, 2020), metric='fg3a_fga'):
+def player_main(athlete_id,  order, train_seasons=range(2016, 2018), test_seasons=range(2018, 2020), metric='fg3a_fga'):
     df = data_loader(seasons=list(train_seasons) + list(test_seasons))
     # subset the data to the player
     df = df[df['athlete_id'] == athlete_id]
@@ -166,14 +166,14 @@ def player_main(athlete_id,  train_seasons=range(2016, 2018), test_seasons=range
     # delta between player and league average
     df[f"{athlete_name}_{metric}_delta"] = df[metric] - df[f'predicted_league_avg_{metric}']
 
-    fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta", order=(4, 0, 0))
+    fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta", order=order)
 
     # Now fit the model and make predictions
     predictions = {}
     unique_dates = df[df['season'].isin(test_seasons)]['game_date'].unique()
     for i in range(len(unique_dates) - 1):
         prediction_date = unique_dates[i + 1]  # We predict the next day
-        predictions[prediction_date] = fit_and_forecast(df, prediction_date, metric=f"{athlete_name}_{metric}_delta", order=(4, 0, 0))
+        predictions[prediction_date] = fit_and_forecast(df, prediction_date, metric=f"{athlete_name}_{metric}_delta", order=order)
     
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{athlete_name}_{metric}_delta'])
     predictions_df = predictions_df.merge(league_game_df, on='game_date', how='inner')
@@ -187,6 +187,6 @@ def player_main(athlete_id,  train_seasons=range(2016, 2018), test_seasons=range
 if __name__ == "__main__":
    # main()
    # brook lopez
-   # player_main(3448)
+   # player_main(athlete_id=3448, order=(4, 0, 0))
    # Chris Paul
-   player_main(2779)
+   player_main(athlete_id=2779, order=(1, 0, 0))
