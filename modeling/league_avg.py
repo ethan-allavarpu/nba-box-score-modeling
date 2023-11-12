@@ -18,6 +18,7 @@ def data_loader(seasons):
     nba_df = nba_df[nba_df['team_id']<=30]
     nba_df['ppm'] = nba_df['points'] / nba_df['minutes']
     nba_df['fg3a_fga'] = nba_df['three_point_field_goals_attempted'] / nba_df['field_goals_attempted']
+    nba_df['season_type'] = (nba_df['season_type'] == 3).astype(int)
     return nba_df
 
 # Function to preprocess data
@@ -157,7 +158,7 @@ def player_main(athlete_id,  train_seasons=range(2016, 2018), test_seasons=range
     df["days_since_last_game"] = df["game_date"].diff().dt.days.fillna(130)
 
     # load the league average data
-    league_game_df = pd.read_csv(f'league_avg_{metric}_predictions.csv')
+    league_game_df = pd.read_csv(f'arima_output/league_avg_{metric}_predictions.csv')
     league_game_df['game_date'] = pd.to_datetime(league_game_df['game_date'])
     # merge the league average data with the player data
     df = pd.merge(df, league_game_df, on='game_date', how='inner')
@@ -186,4 +187,6 @@ def player_main(athlete_id,  train_seasons=range(2016, 2018), test_seasons=range
 if __name__ == "__main__":
    # main()
    # brook lopez
-   player_main(3448)
+   # player_main(3448)
+   # Chris Paul
+   player_main(2779)
