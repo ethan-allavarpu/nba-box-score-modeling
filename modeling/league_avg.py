@@ -146,11 +146,10 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_sea
     
     predictions_df.to_csv(f'{metric}_predictions.csv', index=False)
 
-def player_main(athlete_id,  order, train_seasons=range(2016, 2018), test_seasons=range(2018, 2020), metric='fg3a_fga'):
+def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seasons=range(2018, 2020), metric='fg3a_fga'):
     df = data_loader(seasons=list(train_seasons) + list(test_seasons))
     # subset the data to the player
-    df = df[df['athlete_id'] == athlete_id]
-    athlete_name = df["athlete_display_name"].unique()[0]
+    df = df[df['athlete_display_name'] == athlete_name]
     # sort by date
     df.sort_values('game_date', inplace=True)
 
@@ -188,8 +187,6 @@ def player_main(athlete_id,  order, train_seasons=range(2016, 2018), test_season
 if __name__ == "__main__":
    # main()
    # brook lopez
-   # player_main(athlete_id=3448, order=(4, 0, 0))
-   # Chris Paul
-   # player_main(athlete_id=2779, order=(1, 0, 0))
-   # Kyle Lowry
-   player_main(athlete_id=3012, order=(1, 0, 0))
+   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0))
+   # Kevin Love
+   player_main(athlete_name="Anthony Davis", order=(1, 0, 0))
