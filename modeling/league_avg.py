@@ -180,6 +180,9 @@ def player_main(athlete_id,  order, train_seasons=range(2016, 2018), test_season
     predictions_df = predictions_df.merge(df[['game_date', metric]], on='game_date', how='inner')
     predictions_df[f"predicted_player_{metric}"] = predictions_df[f'predicted_league_avg_{metric}'] + predictions_df[f'predicted_{athlete_name}_{metric}_delta']
 
+    predictions_df = predictions_df.merge(df[['game_date', metric]].rename(columns={metric: f"{athlete_name}_{metric}"}), on='game_date', how='inner')
+
+
     predictions_df.to_csv(f'{athlete_name}_{metric}_predictions.csv', index=False)
 
 
@@ -189,4 +192,4 @@ if __name__ == "__main__":
    # brook lopez
    # player_main(athlete_id=3448, order=(4, 0, 0))
    # Chris Paul
-   player_main(athlete_id=2779, order=(1, 0, 0))
+   player_main(athlete_id=2779, order=(3, 0, 0))
