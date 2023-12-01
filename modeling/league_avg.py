@@ -1,61 +1,12 @@
-import sportsdataverse
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from modeling.data_handling.data_loading import league_data_loader, player_data_loader
 
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
-
-def data_loader(seasons):
-    nba_df = sportsdataverse.nba.load_nba_player_boxscore(seasons=seasons)
-    nba_df = nba_df.to_pandas()
-
-    # Remove entries with 0 minutes played
-    nba_df = nba_df[nba_df['minutes'] > 0]
-    # remove all-star games
-    nba_df = nba_df[nba_df['team_id']<=30]
-    nba_df['ppm'] = nba_df['points'] / nba_df['minutes']
-    nba_df['fg3a_fga'] = nba_df['three_point_field_goals_attempted'] / nba_df['field_goals_attempted']
-    nba_df['season_type'] = (nba_df['season_type'] == 3).astype(int)
-    return nba_df
-
-# Function to preprocess data
-def preprocess_data(seasons):
-    """
-    Load NBA player boxscore data, preprocess it to calculate league average points per minute.
-
-    Args:
-    seasons (list): List of seasons to load data for.
-
-    Returns:
-    DataFrame: Preprocessed NBA league game data.
-    """
-    nba_df = data_loader(seasons)
-    # Aggregate data to league-game level
-    league_game_df = nba_df.groupby(['game_date']).agg(
-        total_pts=('points', 'sum'),
-        fga=('field_goals_attempted', 'sum'),
-        fg3a=('three_point_field_goals_attempted', 'sum'),
-        total_min=('minutes', 'sum'),
-        total_games=('game_id', 'nunique'),
-        season_type=('season_type', 'first'),
-        season=('season', 'first')
-    ).reset_index()
-
-    # Calculate league average points per minute
-    league_game_df['league_avg_ppm'] = league_game_df['total_pts'] / league_game_df['total_min']
-    league_game_df['league_avg_fg3a_fga'] = league_game_df['fg3a'] / (league_game_df['fga'])
-    league_game_df.sort_values('game_date', inplace=True)
-    
-    # Calculate the number of days since last game
-    league_game_df["days_since_last_game"] = league_game_df["game_date"].diff().dt.days.fillna(130)
-    
-    # TODO: use spline on this to capture seasonality
-    league_game_df['date_num'] = league_game_df.groupby(['season']).cumcount() + 1
-    
-    return league_game_df
 
 def fit_and_summarize_arima(league_game_df, metric, order):
     """
@@ -127,7 +78,7 @@ def fit_and_forecast(league_game_df, prediction_date, metric, order):
 def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_seasons=range(2016, 2020)):
 
     # Preprocess the data
-    league_game_df = preprocess_data(seasons=list(train_seasons) + list(test_seasons))
+    league_game_df = league_data_loader(seasons=list(train_seasons) + list(test_seasons))
 
     # Fit and summarize the ARIMA model
     train_league_df = league_game_df[league_game_df['season'].isin(train_seasons)]
@@ -147,7 +98,7 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_sea
     predictions_df.to_csv(f'{metric}_predictions.csv', index=False)
 
 def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seasons=range(2018, 2020), metric='fg3a_fga'):
-    df = data_loader(seasons=list(train_seasons) + list(test_seasons))
+    df = player_data_loader(seasons=list(train_seasons) + list(test_seasons))
     # subset the data to the player
     df = df[df['athlete_display_name'] == athlete_name]
     # sort by date
@@ -165,7 +116,7 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
     # delta between player and league average
     df[f"{athlete_name}_{metric}_delta"] = df[metric] - df[f'predicted_league_avg_{metric}']
 
-    fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta", order=order)
+    fit_and_summarize_arima(df, metric=f"metric", order=order)
 
     # Now fit the model and make predictions
     predictions = {}
@@ -187,6 +138,6 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
 if __name__ == "__main__":
    # main()
    # brook lopez
-   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0))
+   player_main(athlete_name="Brook Lopez", order=(4, 0, 0))
    # Kevin Love
-   player_main(athlete_name="Anthony Davis", order=(1, 0, 0))
+   # player_main(athlete_name="Anthony Davis", order=(1, 0, 0))
