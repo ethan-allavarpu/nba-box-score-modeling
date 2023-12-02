@@ -3,8 +3,12 @@ import pandas as pd
 import numpy as np
 
 def player_data_loader(seasons):
-    nba_df = sportsdataverse.nba.load_nba_player_boxscore(seasons=seasons)
-    nba_df = nba_df.to_pandas()
+    if min(seasons) < 2013:
+        nba_df = sportsdataverse.nba.load_nba_player_boxscore(seasons=range(min(seasons), 2013)).to_pandas()
+        nba_df_2013 = sportsdataverse.nba.load_nba_player_boxscore(seasons=range(2013, max(seasons)+1)).to_pandas()
+        nba_df = pd.concat([nba_df, nba_df_2013])
+    else:
+        nba_df = sportsdataverse.nba.load_nba_player_boxscore(seasons=seasons)
 
     # Remove entries with 0 minutes played and 0 field goals attempted
     nba_df = nba_df[(nba_df['minutes'] > 0) & (nba_df['field_goals_attempted'] > 0)]
@@ -45,8 +49,10 @@ def league_data_loader(seasons):
     
     # Calculate the number of days since last game
     league_game_df["days_since_last_game"] = league_game_df["game_date"].diff().dt.days.fillna(130)
+    league_game_df["days_since_last_game"] = np.clip(league_game_df["days_since_last_game"], 0, 10)
+    
     
     # TODO: use spline on this to capture seasonality
-    league_game_df['date_num'] = league_game_df.groupby(['season']).cumcount() + 1
+    league_game_df['date_num'] = (league_game_df.groupby(['season']).cumcount() + 1) / league_game_df.groupby(['season'])['game_date'].transform('count')
     
     return league_game_df

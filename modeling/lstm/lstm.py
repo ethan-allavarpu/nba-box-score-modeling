@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from modeling.data_handling.data_loading import league_data_loader
 import itertools
+import pandas as pd
 
 # Data Preparation Class
 class SequenceDataset(Dataset):
@@ -15,34 +16,56 @@ class SequenceDataset(Dataset):
         return len(self.sequences)
 
     def __getitem__(self, idx):
-        sequence, ext_data, label = self.sequences[idx]
-        return torch.FloatTensor(sequence), torch.FloatTensor(ext_data), torch.FloatTensor([label])
+        sequence, ext_data, fga_weight, label = self.sequences[idx]
+        return torch.FloatTensor(sequence), torch.FloatTensor(ext_data), torch.FloatTensor([fga_weight]), torch.FloatTensor([label])
 
-def create_inout_sequences(input_data, features, response):
+def create_inout_sequences(input_data, features, response, start_index):
     inout_seq = []
     input_data = input_data.reset_index(drop=True)
-    for i in range(1, len(input_data)):
+    for i in range(start_index, len(input_data)):
         seq_data = input_data.loc[:i-1, features + [response]].values
-
         ext_data = input_data.loc[i, features].values.astype(float)
-
-        # The label is the 'league_avg_fg3a_fga' at time t
+        fga_weight = input_data.loc[i, "weights"]
         label = input_data.loc[i, response]
-
-        inout_seq.append((seq_data, ext_data, label))
+        inout_seq.append((seq_data, ext_data, fga_weight, label))
     return inout_seq
 
+def create_weights(input_data, weight_feature, seasons):
+    input_data['weights'] = input_data[weight_feature].values / input_data.loc[input_data['season'].isin(seasons), weight_feature].sum()
+    return input_data
 
-def prepare_data(data, train_seasons, val_seasons, test_seasons, features, response):
-    # Split the data into train, validation, and test sets
-    train_data = data[data['season'].isin(train_seasons)]
-    val_data = data[data['season'].isin(val_seasons)]
-    test_data = data[data['season'].isin(test_seasons)]
 
-    # sequences
-    train_seq = create_inout_sequences(train_data, features, response)
-    val_seq = create_inout_sequences(val_data, features, response)
-    test_seq = create_inout_sequences(test_data, features, response)
+def prepare_data(data, train_seasons, val_seasons, test_seasons, features, response, weight_feature):
+    full_data = data.copy()
+
+    # Assign start indices for val and test data
+    # start train index at first game of third season
+    train_start_index = full_data[full_data['season'] == (min(train_seasons) + 2)].index.min()
+    val_start_index = full_data[full_data['season'].isin(val_seasons)].index.min()
+    test_start_index = full_data[full_data['season'].isin(test_seasons)].index.min()
+
+    train_data = full_data[full_data['season'].isin(train_seasons)]
+    val_data = full_data[full_data['season'].isin(train_seasons + val_seasons)]
+    test_data = full_data[full_data['season'].isin(train_seasons + val_seasons + test_seasons)]
+
+    # scale features - use train data min and max
+    feature_min = train_data[features].min()
+    feature_max = train_data[features].max()
+    train_data[features] = (train_data[features] - feature_min) / (feature_max - feature_min)
+    val_data[features] = (val_data[features] - feature_min) / (feature_max - feature_min)
+    test_data[features] = (test_data[features] - feature_min) / (feature_max - feature_min)
+
+    # Create weights
+    # make sure min in train_seasons is min(train_seasons) + 2
+    min_season = min(train_seasons) + 2
+    train_data = create_weights(train_data, weight_feature, list(range(min_season, max(train_seasons) + 1)))
+    val_data = create_weights(val_data, weight_feature, val_seasons)
+    test_data = create_weights(test_data, weight_feature, test_seasons)
+
+    # Sequences
+    train_seq = create_inout_sequences(train_data, features, response, start_index=1)
+    val_seq = create_inout_sequences(val_data, features, response, start_index=val_start_index)
+    test_seq = create_inout_sequences(test_data, features, response, start_index=test_start_index)
 
     # Create datasets
     train_dataset = SequenceDataset(train_seq)
@@ -59,75 +82,79 @@ def create_data_loaders(train_dataset, val_dataset, test_dataset, batch_size):
     return train_loader, val_loader, test_loader
 
 def collate_fn(batch):
-    sequences, ext_data, labels = zip(*batch)
+    sequences, ext_data, weights, labels = zip(*batch)
     lengths = [len(seq) for seq in sequences]
     sequences_padded = pad_sequence(sequences, batch_first=True)
     ext_data = torch.stack(ext_data)
+    weights = torch.stack(weights)
     labels = torch.stack(labels)
-    return sequences_padded, ext_data, labels, lengths
+    return sequences_padded, ext_data, weights, labels, lengths
+
+# Custom Weighted MSE Loss
+def weighted_mse_loss(input, target, weight):
+    return (weight * (input - target) ** 2).mean()
+    # return ((input - target) ** 2).mean()
 
 # LSTM Model Class with Pack Padded Sequence
 class LSTMModel(nn.Module):
     def __init__(self, feature_size, hidden_size, num_layers):
         super(LSTMModel, self).__init__()
-        self.lstm = nn.LSTM(feature_size + 1, hidden_size, num_layers, batch_first=True)
-        # linear to includen the external data
-        self.linear = nn.Linear(hidden_size + feature_size, 1)
+        self.lstm = nn.LSTM(feature_size + 1, hidden_size, num_layers, batch_first=True, bidirectional=False)
+        self.final_linear = nn.Linear(1 * num_layers * hidden_size + feature_size, 1)
 
     def forward(self, x, ext_data, lengths):
         packed = pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
-        packed_output, (ht, ct) = self.lstm(packed)
-        output, _ = pad_packed_sequence(packed_output, batch_first=True)
+        packed_output, (ht, ct) = self.lstm(x)
 
-        # Selecting the output of the last time step for each sequence in the batch
-        batch_indices = torch.arange(len(output))
-        last_time_step_indices = [l - 1 for l in lengths]
-        last_outputs = output[batch_indices, last_time_step_indices, :]
+        # Get the last output of the LSTM
+        last_outputs = ht.view(1, -1)
 
-        # Concatenate the last output of the LSTM with the external data
+        # scaled_lstm_outputs = self.relu(self.linear_lstm(last_outputs))
+        # scaled_ext_data = self.relu(self.linear_ext(ext_data))
+
         combined = torch.cat((last_outputs, ext_data), dim=1)
-
-        # Pass the combined data through the linear layer for final prediction
-        prediction = self.linear(combined)
+        prediction = self.final_linear(combined)
         return prediction
 
 # Training Function
-def train_model(model, train_loader, val_loader, criterion, optimizer, epochs):
+def train_model(model, train_loader, val_loader, optimizer, epochs):
     best_val_loss = float('inf')
+    best_model = None
     for epoch in range(epochs):
         model.train()
         total_train_loss = 0
-        for seq, ext_data, labels, lengths in train_loader:
+        for seq, ext_data, weights, labels, lengths in train_loader:
             optimizer.zero_grad()
             y_pred = model(seq, ext_data, lengths)
-            loss = criterion(y_pred, labels)
+            loss = weighted_mse_loss(y_pred, labels, weights)
             loss.backward()
             optimizer.step()
             total_train_loss += loss.item()
 
-        val_loss = evaluate_model(model, val_loader, criterion)
-        print(f'Epoch {epoch+1}/{epochs}, Training Loss: {total_train_loss/len(train_loader)}, Validation Loss: {val_loss}')
+        val_loss = evaluate_model(model, val_loader)
+        print(f'Epoch {epoch+1}/{epochs}, Training Loss: {total_train_loss}, Validation Loss: {val_loss}')
 
         # Save the best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), 'best_model.pth')
+            best_model = model
+    return best_val_loss, best_model
 
 # Evaluation Function
-def evaluate_model(model, loader, criterion):
+def evaluate_model(model, loader):
     model.eval()
     total_loss = 0
     with torch.no_grad():
-        for seq, ext_data, labels, lengths in loader:
+        for seq, ext_data, weights, labels, lengths in loader:
             y_pred = model(seq, ext_data, lengths)
-            loss = criterion(y_pred, labels)
+            loss = weighted_mse_loss(y_pred, labels, weights)
             total_loss += loss.item()
-    return total_loss / len(loader)
+    return total_loss
 
 def hyperparameter_tuning(data, train_seasons, val_seasons, test_seasons, features, response, param_grid=None):
     # Default hyperparameters
     default_params = {
-        'hidden_size': 128,
+        'hidden_size': 32,
         'num_layers': 2,
         'lr': 5e-4,
         'batch_size': 1,
@@ -138,6 +165,7 @@ def hyperparameter_tuning(data, train_seasons, val_seasons, test_seasons, featur
         # Use default hyperparameters
         param_grid = {k: [v] for k, v in default_params.items()}
 
+    best_model = None
     best_params = {}
     best_val_loss = float('inf')
     
@@ -145,39 +173,34 @@ def hyperparameter_tuning(data, train_seasons, val_seasons, test_seasons, featur
         param_dict = dict(zip(param_grid.keys(), params))
         print("Testing with parameters:", param_dict)
         model = LSTMModel(feature_size=len(features), hidden_size=param_dict['hidden_size'], num_layers=param_dict['num_layers'])
-        criterion = nn.MSELoss()
-        optimizer = optim.Adam(model.parameters(), lr=param_dict['lr'], weight_decay=1e-5)
+        optimizer = optim.Adam(model.parameters(), lr=param_dict['lr'])
 
-        train_dataset, val_dataset, test_dataset = prepare_data(data, train_seasons, val_seasons, test_seasons, features, response)
+        train_dataset, val_dataset, test_dataset = prepare_data(data, train_seasons, val_seasons, test_seasons, features, response, weight_feature='fga')
         train_loader, val_loader, test_dataset = create_data_loaders(train_dataset, val_dataset, test_dataset, batch_size=param_dict['batch_size'])
 
-        train_model(model, train_loader, val_loader, criterion, optimizer, param_dict['epochs'])
+        val_loss, model = train_model(model, train_loader, val_loader, optimizer, param_dict['epochs'])
 
-        val_loss = evaluate_model(model, val_loader, criterion)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_params = param_dict
+            best_model = model
 
     print(f"Best Parameters: {best_params}, Best Validation Loss: {best_val_loss}")
-    return best_params
+    return best_model, best_params
 
 # Function to Run the Model with Best Parameters and Save Test Predictions
 def run_and_save_predictions(data, train_seasons, val_seasons, test_seasons, features, response, best_params):
-    train_dataset, val_dataset, test_dataset = prepare_data(data, train_seasons, val_seasons, test_seasons, features, response)
+    train_dataset, val_dataset, test_dataset = prepare_data(data, train_seasons, val_seasons, test_seasons, features, response, weight_feature='fga')
     train_loader, val_loader, test_loader = create_data_loaders(train_dataset, val_dataset, test_dataset, batch_size=best_params['batch_size'])
 
-    model = LSTMModel(input_size=len(features), hidden_size=best_params['hidden_size'], num_layers=best_params['num_layers'])
+    model = LSTMModel(feature_size=len(features), hidden_size=best_params['hidden_size'], num_layers=best_params['num_layers'])
     model.load_state_dict(torch.load('best_model.pth'))
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=best_params['lr'], weight_decay=1e-5)
-
-    train_model(model, train_loader, val_loader, criterion, optimizer, best_params['epochs'])
 
     # Save Test Predictions
     model.eval()
     test_predictions = []
     with torch.no_grad():
-        for seq, ext_data, labels, lengths in test_loader:
+        for seq, ext_data, weights, labels, lengths in test_loader:
             y_pred = model(seq, ext_data, lengths)
             test_predictions.extend(y_pred.tolist())
 
@@ -186,8 +209,9 @@ def run_and_save_predictions(data, train_seasons, val_seasons, test_seasons, fea
 
 
 # Run the Model with Best Parameters and Save Test Predictions
-data = league_data_loader(seasons=range(2014, 2020))
-features = ['days_since_last_game', 'season_type', 'date_num']
-best_params = hyperparameter_tuning(data, range(2012, 2016), range(2016, 2017), range(2017, 2020), features, 'league_avg_fg3a_fga', param_grid=None)
-run_and_save_predictions(range(2012, 2016), range(2016, 2017), range(2017, 2020), features, 'league_avg_fg3a_fga')
+data = league_data_loader(seasons=list(range(2010, 2020)))
+features = ['season_type', 'date_num']
+best_model, best_params = hyperparameter_tuning(data, list(range(2010, 2015)), list(range(2015, 2016)), list(range(2016, 2020)), features, 'league_avg_fg3a_fga', param_grid=None)
+torch.save(best_model.state_dict(), 'best_model.pth')
+run_and_save_predictions(data, list(range(2010, 2015)), list(range(2015, 2016)), list(range(2016, 2020)), features, 'league_avg_fg3a_fga', best_params)
 
