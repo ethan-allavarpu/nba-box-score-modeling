@@ -3,9 +3,24 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from modeling.data_handling.data_loading import league_data_loader
 import itertools
 import pandas as pd
+import numpy as np
+import pandas as pd
+import random
+
+torch.manual_seed(0)
+np.random.seed(0)
+random.seed(0)
+
+import ssl
+import sys
+import os
+
+ssl._create_default_https_context = ssl._create_unverified_context
+
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from data_handling.data_loading import league_data_loader
 
 # Data Preparation Class
 class SequenceDataset(Dataset):
@@ -19,14 +34,17 @@ class SequenceDataset(Dataset):
         sequence, ext_data, fga_weight, label = self.sequences[idx]
         return torch.FloatTensor(sequence), torch.FloatTensor(ext_data), torch.FloatTensor([fga_weight]), torch.FloatTensor([label])
 
-def create_inout_sequences(input_data, features, response, start_index):
+def create_inout_sequences(input_data, features, response, start_index, lag=4):
     inout_seq = []
     input_data = input_data.reset_index(drop=True)
     for i in range(start_index, len(input_data)):
-        seq_data = input_data.loc[:i-1, features + [response]].values
-        ext_data = input_data.loc[i, features].values.astype(float)
-        fga_weight = input_data.loc[i, "weights"]
-        label = input_data.loc[i, response]
+        end = i + lag
+        if end > len(input_data) - 1:
+            break
+        seq_data = input_data.loc[i : (end - 1), response].values.astype(float)
+        ext_data = input_data.loc[end, features].values.astype(float)
+        fga_weight = input_data.loc[end, "weights"]
+        label = input_data.loc[end, response]
         inout_seq.append((seq_data, ext_data, fga_weight, label))
     return inout_seq
 
@@ -92,15 +110,17 @@ def collate_fn(batch):
 
 # Custom Weighted MSE Loss
 def weighted_mse_loss(input, target, weight):
-    return (weight * (input - target) ** 2).mean()
-    # return ((input - target) ** 2).mean()
+    # return (weight * (input - target) ** 2).mean()
+    return ((input - target) ** 2).mean()
 
 # LSTM Model Class with Pack Padded Sequence
 class LSTMModel(nn.Module):
     def __init__(self, feature_size, hidden_size, num_layers):
         super(LSTMModel, self).__init__()
-        self.lstm = nn.LSTM(feature_size + 1, hidden_size, num_layers, batch_first=True, bidirectional=False)
-        self.final_linear = nn.Linear(1 * num_layers * hidden_size + feature_size, 1)
+        self.lstm = nn.LSTM(4, hidden_size, num_layers, batch_first=True, bidirectional=False)
+        self.linear = nn.Linear(1 * num_layers * hidden_size + feature_size, 4)
+        self.act = nn.ReLU()
+        self.final_linear = nn.Linear(4, 1)
 
     def forward(self, x, ext_data, lengths):
         packed = pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
@@ -113,8 +133,8 @@ class LSTMModel(nn.Module):
         # scaled_ext_data = self.relu(self.linear_ext(ext_data))
 
         combined = torch.cat((last_outputs, ext_data), dim=1)
-        prediction = self.final_linear(combined)
-        return prediction
+        prediction = self.final_linear(self.act(self.linear(combined)))
+        return prediction.squeeze()
 
 # Training Function
 def train_model(model, train_loader, val_loader, optimizer, epochs):
@@ -158,7 +178,7 @@ def hyperparameter_tuning(data, train_seasons, val_seasons, test_seasons, featur
         'num_layers': 2,
         'lr': 5e-4,
         'batch_size': 1,
-        'epochs': 10
+        'epochs': 500
     }
 
     if param_grid is None or not param_grid:
@@ -202,10 +222,17 @@ def run_and_save_predictions(data, train_seasons, val_seasons, test_seasons, fea
     with torch.no_grad():
         for seq, ext_data, weights, labels, lengths in test_loader:
             y_pred = model(seq, ext_data, lengths)
-            test_predictions.extend(y_pred.tolist())
-
-    pd.DataFrame(test_predictions, columns=['Predictions']).to_csv('test_predictions.csv', index=False)
-    print("Test predictions saved to 'test_predictions.csv'.")
+            test_predictions += [y_pred.tolist()]
+    pd.concat(
+        [
+            data[data.season.isin(test_seasons)][
+                ["league_avg_fg3a_fga", "fga"]
+            ].reset_index(),
+            pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index() + data[data.season.isin(val_seasons)].league_avg_fg3a_fga.mean() - data[data.season.isin(train_seasons)].league_avg_fg3a_fga.mean(),
+        ],
+        axis=1,
+    ).to_csv("lstm_test_predictions.csv", index=False)
+    print("Test predictions saved to 'lstm_test_predictions.csv'.")
 
 
 # Run the Model with Best Parameters and Save Test Predictions

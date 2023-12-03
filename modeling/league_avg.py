@@ -3,12 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-from modeling.data_handling.data_loading import league_data_loader, player_data_loader
+from data_handling.data_loading import league_data_loader, player_data_loader
 
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
-def fit_and_summarize_arima(league_game_df, metric, order):
+def fit_and_summarize_arima(league_game_df, metric, order, athlete="overall"):
     """
     Fit ARIMA model to the entire dataset and provide a summary, including ACF and PACF plots.
 
@@ -20,13 +20,13 @@ def fit_and_summarize_arima(league_game_df, metric, order):
     plt.figure(figsize=(7, 7))
     plot_acf(league_game_df[metric], ax=plt.gca(), lags=40)
     plt.title('Autocorrelation Function (ACF)')
-    plt.savefig(f"plots/acf_{metric}.png")
+    plt.savefig(f"plots/acf_{metric}_{athlete}.png")
 
 
     plt.figure(figsize=(7, 7))
     plot_pacf(league_game_df[metric], ax=plt.gca(), lags=40, method='ywm')
     plt.title('Partial Autocorrelation Function (PACF)')
-    plt.savefig(f"plots/pacf_{metric}.png")
+    plt.savefig(f"plots/pacf_{metric}_{athlete}.png")
 
     # Fit the ARIMA model
     exog_df = league_game_df[['days_since_last_game', 'season_type']]
@@ -75,7 +75,7 @@ def fit_and_forecast(league_game_df, prediction_date, metric, order):
 
     return forecast.iloc[0]
 
-def main(metric='league_avg_fg3a_fga', train_seasons=range(2014, 2016), test_seasons=range(2016, 2020)):
+def main(metric='league_avg_fg3a_fga', train_seasons=range(2010, 2016), test_seasons=range(2016, 2020)):
 
     # Preprocess the data
     league_game_df = league_data_loader(seasons=list(train_seasons) + list(test_seasons))
@@ -108,7 +108,7 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
     df["days_since_last_game"] = df["game_date"].diff().dt.days.fillna(130)
 
     # load the league average data
-    league_game_df = pd.read_csv(f'arima_output/league_avg_{metric}_predictions.csv')
+    league_game_df = pd.read_csv(f'league_avg_{metric}_predictions.csv')
     league_game_df['game_date'] = pd.to_datetime(league_game_df['game_date'])
     # merge the league average data with the player data
     df = pd.merge(df, league_game_df, on='game_date', how='inner')
@@ -116,7 +116,7 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
     # delta between player and league average
     df[f"{athlete_name}_{metric}_delta"] = df[metric] - df[f'predicted_league_avg_{metric}']
 
-    fit_and_summarize_arima(df, metric=f"metric", order=order)
+    fit_and_summarize_arima(df, metric=f"{metric}", order=order, athlete=athlete_name)
 
     # Now fit the model and make predictions
     predictions = {}
@@ -138,6 +138,6 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
 if __name__ == "__main__":
    # main()
    # brook lopez
-   player_main(athlete_name="Brook Lopez", order=(4, 0, 0))
-   # Kevin Love
-   # player_main(athlete_name="Anthony Davis", order=(1, 0, 0))
+   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0))
+   # Anthony Davis
+   player_main(athlete_name="Anthony Davis", order=(1, 0, 1))

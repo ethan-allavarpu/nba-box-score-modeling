@@ -23,6 +23,9 @@ np_utils.set_random_seed(2023)
 
 data = league_data_loader(seasons=list(range(2010, 2020)))
 
+def weighted_mse(true, pred, weights):
+    return (weights * (true - pred) ** 2).sum() / weights.sum()
+
 # Split into training sequence, test sequence
 
 
@@ -34,6 +37,9 @@ def get_x_y(seq, lag):
 
 train_seq = np.array(
     data[data.season.isin(list(range(2010, 2015)))].league_avg_fg3a_fga.tolist()
+)
+val_seq = np.array(
+    data[data.season.isin(list(range(2015, 2016)))].league_avg_fg3a_fga.tolist()
 )
 # Same as AR model
 lag = 4
@@ -57,6 +63,13 @@ test_seq = np.array(
 )
 test_x, test_y = get_x_y(test_seq, lag)
 test_x = test_x.reshape((test_x.shape[0], test_x.shape[1], 1))
-yhats = causal_cnn.predict(test_x)
-print(mean_squared_error(yhats, test_y))
-print(r2_score(y_true=test_y, y_pred=yhats))
+yhats = causal_cnn.predict(test_x).squeeze()
+print(mean_squared_error(yhats, test_y.squeeze()))
+print(r2_score(y_true=test_y.squeeze(), y_pred=yhats))
+
+weights = np.array(
+    data[data.season.isin(list(range(2016, 2020)))].fga.iloc[4:].tolist()
+).squeeze()
+
+pd.DataFrame({"true": test_y, "preds": yhats, "weights": weights}).to_csv("keras_cnn_preds.csv", index=False)
+print(weighted_mse(test_y, yhats, weights))

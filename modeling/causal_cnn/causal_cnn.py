@@ -350,7 +350,7 @@ def run_and_save_predictions(
             data[data.season.isin(test_seasons)][
                 ["league_avg_fg3a_fga", "fga"]
             ].reset_index(),
-            pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index(),
+            pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index() - pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index().mean() + 2 * data[data.season.isin(val_seasons)].league_avg_fg3a_fga.mean() - data[data.season.isin(train_seasons)].league_avg_fg3a_fga.mean(),
         ],
         axis=1,
     ).to_csv("cnn_test_predictions.csv", index=False)
