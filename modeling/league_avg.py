@@ -93,11 +93,11 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2010, 2016), test_sea
         predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric, order=(4, 0, 0))
 
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{metric}'])
-    predictions_df = predictions_df.merge(league_game_df[['game_date', metric]], on='game_date', how='inner')
+    predictions_df = predictions_df.merge(league_game_df[['game_date', metric, 'fga']], on='game_date', how='inner')
     
     predictions_df.to_csv(f'{metric}_predictions.csv', index=False)
 
-def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seasons=range(2018, 2020), metric='fg3a_fga'):
+def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seasons=range(2018, 2020), metric='fg3a_fga', league_model=None):
     df = player_data_loader(seasons=list(train_seasons) + list(test_seasons))
     # subset the data to the player
     df = df[df['athlete_display_name'] == athlete_name]
@@ -110,13 +110,30 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
     # load the league average data
     league_game_df = pd.read_csv(f'league_avg_{metric}_predictions.csv')
     league_game_df['game_date'] = pd.to_datetime(league_game_df['game_date'])
-    # merge the league average data with the player data
-    df = pd.merge(df, league_game_df, on='game_date', how='inner')
+    if league_model is None:
+        # load the league average data
+        league_game_df = pd.read_csv(f'league_avg_{metric}_predictions.csv')
+        league_game_df['game_date'] = pd.to_datetime(league_game_df['game_date'])
+        # merge the league average data with the player data
+        df = pd.merge(df, league_game_df, on='game_date', how='inner')
 
-    # delta between player and league average
-    df[f"{athlete_name}_{metric}_delta"] = df[metric] - df[f'predicted_league_avg_{metric}']
+        # delta between player and league average
+        df[f"{athlete_name}_{metric}_delta"] = df[metric] - df[f'predicted_league_avg_{metric}']
+        pred_col = f'predicted_league_avg_{metric}'
+    else:
+        # load the league average data
+        preds_df = pd.read_csv(league_model[1])
+        preds_df = preds_df.iloc[:-4, :][["Predictions"]].reset_index(drop=True)
+        preds_df['game_date'] = league_game_df.game_date.iloc[3:].reset_index(drop=True)
+        league_game_df = preds_df
+        # merge the league average data with the player data
+        df = pd.merge(df, league_game_df, on='game_date', how='inner')
 
-    fit_and_summarize_arima(df, metric=f"{metric}", order=order, athlete=athlete_name)
+        # delta between player and league average
+        df[f"{athlete_name}_{metric}_delta"] = df[metric] - df['Predictions']
+        pred_col = "Predictions"
+
+    fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta", order=order, athlete=athlete_name)
 
     # Now fit the model and make predictions
     predictions = {}
@@ -128,16 +145,21 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{athlete_name}_{metric}_delta'])
     predictions_df = predictions_df.merge(league_game_df, on='game_date', how='inner')
     predictions_df = predictions_df.merge(df[['game_date', metric]], on='game_date', how='inner')
-    predictions_df[f"predicted_player_{metric}"] = predictions_df[f'predicted_league_avg_{metric}'] + predictions_df[f'predicted_{athlete_name}_{metric}_delta']
-    predictions_df = predictions_df.merge(df[['game_date', metric]].rename(columns={metric: f"{athlete_name}_{metric}"}), on='game_date', how='inner')
-
-    predictions_df.to_csv(f'{athlete_name}_{metric}_predictions.csv', index=False)
+    predictions_df[f"predicted_player_{metric}"] = predictions_df[pred_col] + predictions_df[f'predicted_{athlete_name}_{metric}_delta']
+    predictions_df = predictions_df.merge(df[['game_date', metric, 'field_goals_attempted']].rename(columns={metric: f"{athlete_name}_{metric}"}), on='game_date', how='inner')
+    
+    if league_model is None:
+        predictions_df.to_csv(f'{athlete_name}_{metric}_predictions.csv', index=False)
+    else:
+        predictions_df.to_csv(f'{athlete_name}_{metric}_predictions_{league_model[0]}.csv', index=False)
 
 
 
 if __name__ == "__main__":
    # main()
    # brook lopez
-   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0))
+   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0), league_model=("LSTM", "lstm/lstm_test_predictions.csv"))
    # Anthony Davis
-   player_main(athlete_name="Anthony Davis", order=(1, 0, 1))
+   # player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=None)
+   player_main(athlete_name="Anthony Davis", order=(1, 0, 0), league_model=("CNN", "causal_cnn/cnn_test_predictions.csv"))
+   player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=("LSTM", "lstm/lstm_test_predictions.csv"))
