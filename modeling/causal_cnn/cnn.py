@@ -3,7 +3,6 @@ from keras.models import Sequential
 from keras.layers import Dense
 from keras.layers import Flatten
 from keras.layers import Conv1D
-from keras.layers import MaxPooling1D
 
 import numpy as np
 import os
