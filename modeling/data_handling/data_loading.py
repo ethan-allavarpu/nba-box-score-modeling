@@ -17,6 +17,8 @@ def player_data_loader(seasons):
     nba_df['ppm'] = nba_df['points'] / nba_df['minutes']
     nba_df['fg3a_fga'] = nba_df['three_point_field_goals_attempted'] / nba_df['field_goals_attempted']
     nba_df['season_type'] = (nba_df['season_type'] == 3).astype(int)
+    nba_df['fga'] = nba_df['field_goals_attempted']
+
     return nba_df
 
 # Function to preprocess data
