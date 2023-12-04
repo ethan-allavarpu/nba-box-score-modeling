@@ -8,7 +8,7 @@ def player_data_loader(seasons):
         nba_df_2013 = sportsdataverse.nba.load_nba_player_boxscore(seasons=range(2013, max(seasons)+1)).to_pandas()
         nba_df = pd.concat([nba_df, nba_df_2013])
     else:
-        nba_df = sportsdataverse.nba.load_nba_player_boxscore(seasons=seasons)
+        nba_df = sportsdataverse.nba.load_nba_player_boxscore(seasons=seasons).to_pandas()
 
     # Remove entries with 0 minutes played and 0 field goals attempted
     nba_df = nba_df[(nba_df['minutes'] > 0) & (nba_df['field_goals_attempted'] > 0)]
