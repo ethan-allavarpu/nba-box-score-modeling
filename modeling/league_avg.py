@@ -82,7 +82,7 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2010, 2016), test_sea
 
     # Fit and summarize the ARIMA model
     train_league_df = league_game_df[league_game_df['season'].isin(train_seasons)]
-    fit_and_summarize_arima(train_league_df, metric=metric, order=(4, 0, 0))
+    fit_and_summarize_arima(train_league_df, metric=metric, order=(4, 1, 0))
 
     # Store predictions in a dictionary
     predictions = {}
@@ -90,7 +90,7 @@ def main(metric='league_avg_fg3a_fga', train_seasons=range(2010, 2016), test_sea
     unique_dates = league_game_df[league_game_df['season'].isin(test_seasons)]['game_date'].unique()
     for i in range(len(unique_dates) - 1):
         prediction_date = unique_dates[i + 1]  # We predict the next day
-        predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric, order=(4, 0, 0))
+        predictions[prediction_date] = fit_and_forecast(league_game_df, prediction_date, metric=metric, order=(4, 1, 0))
 
     predictions_df = pd.DataFrame(list(predictions.items()), columns=['game_date', f'predicted_{metric}'])
     predictions_df = predictions_df.merge(league_game_df[['game_date', metric, 'fga']], on='game_date', how='inner')
@@ -120,6 +120,16 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
         # delta between player and league average
         df[f"{athlete_name}_{metric}_delta"] = df[metric] - df[f'predicted_league_avg_{metric}']
         pred_col = f'predicted_league_avg_{metric}'
+    elif league_model[0] == "Prophet":
+        # load the league average data
+        league_game_df = pd.read_csv(league_model[1])[["game_date", "yhat"]]
+        league_game_df['game_date'] = pd.to_datetime(league_game_df['game_date'])
+        # merge the league average data with the player data
+        df = pd.merge(df, league_game_df, on='game_date', how='inner')
+
+        # delta between player and league average
+        df[f"{athlete_name}_{metric}_delta"] = df[metric] - df['yhat']
+        pred_col = 'yhat'
     else:
         # load the league average data
         preds_df = pd.read_csv(league_model[1])
@@ -132,6 +142,8 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
         # delta between player and league average
         df[f"{athlete_name}_{metric}_delta"] = df[metric] - df['Predictions']
         pred_col = "Predictions"
+
+    print(df.columns)
 
     fit_and_summarize_arima(df, metric=f"{athlete_name}_{metric}_delta", order=order, athlete=athlete_name)
 
@@ -158,8 +170,10 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
 if __name__ == "__main__":
    # main()
    # brook lopez
-   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0), league_model=("LSTM", "lstm/lstm_test_predictions.csv"))
+   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0))
+   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0), league_model=("Prophet", "prophet_league_avg_fg3a_fga_predictions.csv"))
    # Anthony Davis
    # player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=None)
-   player_main(athlete_name="Anthony Davis", order=(1, 0, 0), league_model=("CNN", "causal_cnn/cnn_test_predictions.csv"))
-   player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=("LSTM", "lstm/lstm_test_predictions.csv"))
+   # player_main(athlete_name="Anthony Davis", order=(1, 0, 0), league_model=("CNN", "causal_cnn/cnn_test_predictions.csv"))
+   # player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=("LSTM", "lstm/lstm_test_predictions.csv"))
+   player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=("Prophet", "prophet_league_avg_fg3a_fga_predictions.csv"))
