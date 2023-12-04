@@ -239,9 +239,9 @@ def generate_predictions(model, test_loader, player_df, league_df, test_seasons,
     # merge preds athlete by athlete
     for athlete in predictions.keys():
         predictions[athlete] = torch.cat(predictions[athlete]).numpy()
-        test_player_data.loc[test_player_data['athlete_display_name'] == athlete, 'predictions'] = predictions[athlete]
+        test_player_data.loc[test_player_data['athlete_display_name'] == athlete, 'player_predictions'] = predictions[athlete]
     # print weighted mse grouped by player
-    test_player_data['weighted_mse'] = test_player_data['weights'] * (test_player_data['predictions'] - test_player_data['fg3a_fga'])**2
+    test_player_data['weighted_mse'] = test_player_data['weights'] * (test_player_data['player_predictions'] - test_player_data['fg3a_fga'])**2
     print(test_player_data.groupby('athlete_display_name')['weighted_mse'].sum())
     # subtract mean predictions and add 2 * validation mean and subtract training mean
     test_player_data['league_predictions'] = [pred.item() for pred in league_preds]
@@ -255,8 +255,8 @@ def generate_predictions(model, test_loader, player_df, league_df, test_seasons,
     print(test_league_data['weighted_mse'].sum())
 
     # to csv
-    test_player_data.to_csv('test_player_data.csv')
-    test_league_data.to_csv('test_league_data.csv')
+    test_player_data.to_csv('hierarchical_player_data.csv')
+    test_league_data.to_csv('hierarchical_league_data.csv')
 
 def weighted_mse(true, pred, weights):
     return (weights * (true - pred) ** 2).sum() / weights.sum()
