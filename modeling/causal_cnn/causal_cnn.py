@@ -66,7 +66,7 @@ def create_weights(input_data, weight_feature, seasons):
 
 
 def prepare_data(
-    data, train_seasons, val_seasons, test_seasons, features, response, weight_feature
+    data, train_seasons, val_seasons, test_seasons, features, response, weight_feature, lag=4
 ):
     full_data = data.copy()
 
@@ -347,7 +347,7 @@ def run_and_save_predictions(
         [
             data[data.season.isin(test_seasons)][
                 ["league_avg_fg3a_fga", "fga"]
-            ].reset_index(),
+            ].reset_index(drop=True),
             pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index() - pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index().mean() + 2 * data[data.season.isin(val_seasons)].league_avg_fg3a_fga.mean() - data[data.season.isin(train_seasons)].league_avg_fg3a_fga.mean(),
         ],
         axis=1,
@@ -383,6 +383,7 @@ df_cnn = pd.read_csv("cnn_test_predictions.csv")
 def weighted_mse(true, pred, weights):
     return (weights * (true - pred) ** 2).sum() / weights.sum()
 
+# Reshift to make sure predictions match same game_date
 print(np.corrcoef(df_cnn.league_avg_fg3a_fga.iloc[4:], df_cnn.Predictions[:-4]))
 print(weighted_mse(df_cnn.league_avg_fg3a_fga.iloc[4:],
              df_cnn.Predictions[:-4],

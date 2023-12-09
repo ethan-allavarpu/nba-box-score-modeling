@@ -20,13 +20,13 @@ def fit_and_summarize_arima(league_game_df, metric, order, athlete="overall"):
     plt.figure(figsize=(7, 7))
     plot_acf(league_game_df[metric], ax=plt.gca(), lags=40)
     plt.title('Autocorrelation Function (ACF)')
-    plt.savefig(f"plots/acf_{metric}_{athlete}.png")
+    plt.savefig(f"plots/acf_{metric}_{athlete}.png", dpi=300, bbox_inches="tight")
 
 
     plt.figure(figsize=(7, 7))
     plot_pacf(league_game_df[metric], ax=plt.gca(), lags=40, method='ywm')
     plt.title('Partial Autocorrelation Function (PACF)')
-    plt.savefig(f"plots/pacf_{metric}_{athlete}.png")
+    plt.savefig(f"plots/pacf_{metric}_{athlete}.png", dpi=300, bbox_inches="tight")
 
     # Fit the ARIMA model
     exog_df = league_game_df[['days_since_last_game', 'season_type']]
@@ -168,12 +168,14 @@ def player_main(athlete_name,  order, train_seasons=range(2016, 2018), test_seas
 
 
 if __name__ == "__main__":
-   # main()
+   main()
    # brook lopez
-   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0))
-   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0), league_model=("Prophet", "prophet_league_avg_fg3a_fga_predictions.csv"))
+   # player_main(athlete_name="Brook Lopez", order=(4, 1, 0))
+   # player_main(athlete_name="Brook Lopez", order=(4, 1, 0), league_model=("Prophet", "prophet_league_avg_fg3a_fga_predictions.csv"))
+   # player_main(athlete_name="Brook Lopez", order=(4, 1, 0), league_model=("CNN", "cnn_test_predictions.csv"))
+   # player_main(athlete_name="Brook Lopez", order=(4, 0, 0), league_model=("LSTM", "lstm_test_predictions.csv"))
    # Anthony Davis
-   # player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=None)
-   # player_main(athlete_name="Anthony Davis", order=(1, 0, 0), league_model=("CNN", "causal_cnn/cnn_test_predictions.csv"))
-   # player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=("LSTM", "lstm/lstm_test_predictions.csv"))
-   player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=("Prophet", "prophet_league_avg_fg3a_fga_predictions.csv"))
+   # player_main(athlete_name="Anthony Davis", order=(1, 1, 1), league_model=None)
+   # player_main(athlete_name="Anthony Davis", order=(1, 1, 0), league_model=("CNN", "causal_cnn/cnn_test_predictions.csv"))
+   # player_main(athlete_name="Anthony Davis", order=(1, 0, 1), league_model=("LSTM", "lstm_test_predictions.csv"))
+   # player_main(athlete_name="Anthony Davis", order=(1, 1, 1), league_model=("Prophet", "prophet_league_avg_fg3a_fga_predictions.csv"))

@@ -1,10 +1,26 @@
+import numpy as np
 import pandas as pd
-from modeling.data_handling.data_loading import league_data_loader, player_data_loader
 
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 import torch
 import torch.nn as nn
 
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import os
+import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from data_handling.data_loading import league_data_loader
+
+from data_handling.data_loading import league_data_loader, player_data_loader
+
+import random
+
+torch.manual_seed(0)
+np.random.seed(0)
+random.seed(0)
 
 def get_hierarchical_data(seasons, athlete_names=[]):
     league_data = league_data_loader(seasons)
@@ -162,7 +178,10 @@ class HierarchicalLSTM(nn.Module):
             setattr(self, f'player_lstm_{player_name}', nn.LSTM(feature_size + 1, hidden_size, num_layers, batch_first=True))
             setattr(self, f'player_fc_{player_name}', nn.Linear(hidden_size + feature_size, 1))
 
-    def forward(self, x, ext_data, league_x, league_ext_data, player_name):
+    def forward(self, x, ext_data, league_x, league_ext_data, player_name, player_fga, gamma=None):
+        if gamma is None:
+            gamma = player_fga.loc[player_name] * 2
+        alpha = max(player_fga.loc[player_name] / gamma, 1)
         # last hidden state of league lstm
         league_out, _ = self.league_lstm(league_x)
         league_out = league_out[:, -1, :]
@@ -183,10 +202,10 @@ class HierarchicalLSTM(nn.Module):
         player_out = self.player_fc(player_out)
         player_specific_out = player_specific_fc(player_specific_out)
         # make sure output is positive
-        return league_out, player_out + player_specific_out + league_out
+        return league_out, (1 - alpha) * player_out + alpha * player_specific_out + league_out
 
 # Training Function
-def train_model(model, train_loader, val_loader, optimizer, epochs, player_weight):
+def train_model(model, train_loader, val_loader, optimizer, epochs, player_weight, player_fga):
     train_losses = []
     val_losses = []
     best_val_loss = float('inf')
@@ -198,7 +217,7 @@ def train_model(model, train_loader, val_loader, optimizer, epochs, player_weigh
         train_league_loss = 0
         for batch_idx, (x, ext_data, fga_weight, label, league_x, league_ext_data, league_label, league_fga_weight, player_name) in enumerate(train_loader):
             optimizer.zero_grad()
-            league_out, output = model(x, ext_data, league_x, league_ext_data, player_name)
+            league_out, output = model(x, ext_data, league_x, league_ext_data, player_name, player_fga)
             # player loss + league loss
             player_loss = torch.sum(fga_weight * (output - label)**2) * player_weight
             league_loss = torch.sum(league_fga_weight * (league_out - league_label)**2) * (1 - player_weight)
@@ -213,7 +232,7 @@ def train_model(model, train_loader, val_loader, optimizer, epochs, player_weigh
         val_loss = 0
         with torch.no_grad():
             for batch_idx, (x, ext_data, fga_weight, label, league_x, league_ext_data, league_label, league_fga_weight, player_name) in enumerate(val_loader):
-                league_out, output = model(x, ext_data, league_x, league_ext_data, player_name)
+                league_out, output = model(x, ext_data, league_x, league_ext_data, player_name, player_fga, gamma=player_fga.max())
                 loss = torch.sum(fga_weight * (output - label)**2) * player_weight
                 loss += torch.sum(league_fga_weight * (league_out - league_label)**2) * (1 - player_weight)
                 val_loss += loss.item()
@@ -225,15 +244,16 @@ def train_model(model, train_loader, val_loader, optimizer, epochs, player_weigh
             best_model = model
     return train_losses, val_losses, best_model
 
-def generate_predictions(model, test_loader, player_df, league_df, test_seasons, athlete_names):
+def generate_predictions(model, test_loader, player_df, league_df, test_seasons, athlete_names, player_fga):
     model.eval()
     league_preds = []
     predictions = {athlete: [] for athlete in athlete_names}
     with torch.no_grad():
         for batch_idx, (x, ext_data, fga_weight, label, league_x, league_ext_data, league_fga_weight, league_label, player_name) in enumerate(test_loader):
-            league_out, output = model(x, ext_data, league_x, league_ext_data, player_name)
+            league_out, output = model(x, ext_data, league_x, league_ext_data, player_name, player_fga, gamma=player_fga.max())
             league_preds.append(league_out)
             predictions[player_name[0]].append(output)
+    
     test_player_data, test_league_data = (player_df[player_df['season'].isin(test_seasons)], league_df[league_df['season'].isin(test_seasons)])
     test_player_data = create_weights(test_player_data, 'fga', train_seasons, groupby=['athlete_id'])
     # merge preds athlete by athlete
@@ -255,24 +275,29 @@ def generate_predictions(model, test_loader, player_df, league_df, test_seasons,
     print(test_league_data['weighted_mse'].sum())
 
     # to csv
+    train_df = league_data_loader(range(2010, 2015))
+    val_df = league_data_loader(range(2015, 2016))
+    # Account for drift over time
+    test_league_data.league_predictions = test_league_data.league_predictions - test_league_data.league_predictions.mean() + 2 * val_df.league_avg_fg3a_fga.mean() - train_df.league_avg_fg3a_fga.mean()
     test_player_data.to_csv('hierarchical_player_data.csv')
     test_league_data.to_csv('hierarchical_league_data.csv')
 
-def weighted_mse(true, pred, weights):
-    return (weights * (true - pred) ** 2).sum() / weights.sum()
+
 
 
 athlete_names = ["Anthony Davis", "Brook Lopez"]
 features = ['season_type', 'date_num']
-train_seasons = list(range(2015, 2017))
-val_seasons = list(range(2017, 2018))
-test_seasons = list(range(2018, 2020))
+train_seasons = list(range(2010, 2015))
+val_seasons = list(range(2015, 2016))
+test_seasons = list(range(2016, 2020))
 train_dataset, val_dataset, test_dataset, player_df, league_df = prepare_data(train_seasons, val_seasons, test_seasons, features, 'fg3a_fga', lag=4, athlete_names=athlete_names)
+player_fga = player_data_loader(train_seasons).groupby("athlete_display_name").fga.sum()
 
 train_loader, val_loader, test_loader = create_data_loaders(train_dataset, val_dataset, test_dataset, batch_size=1)
 
 model = HierarchicalLSTM(len(features), 16, 2, athlete_names)
 optimizer = torch.optim.Adam(model.parameters(), lr=5e-3)
-train_losses, val_losses, best_model = train_model(model, train_loader, val_loader, optimizer, epochs=100, player_weight=0.025)
+train_losses, val_losses, best_model = train_model(model, train_loader, val_loader, optimizer, epochs=100, player_weight=0.33, player_fga=player_fga)
 torch.save(best_model.state_dict(), 'best_hierarchical_model.pth')
-generate_predictions(best_model, test_loader, player_df, league_df, test_seasons, athlete_names=athlete_names)
+generate_predictions(best_model, test_loader, player_df, league_df, test_seasons, athlete_names=athlete_names, player_fga=player_fga)
+
