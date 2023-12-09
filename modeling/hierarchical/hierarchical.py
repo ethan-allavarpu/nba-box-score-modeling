@@ -297,7 +297,7 @@ train_loader, val_loader, test_loader = create_data_loaders(train_dataset, val_d
 
 model = HierarchicalLSTM(len(features), 16, 2, athlete_names)
 optimizer = torch.optim.Adam(model.parameters(), lr=5e-3)
-train_losses, val_losses, best_model = train_model(model, train_loader, val_loader, optimizer, epochs=100, player_weight=0.33, player_fga=player_fga)
+train_losses, val_losses, best_model = train_model(model, train_loader, val_loader, optimizer, epochs=200, player_weight=0.2, player_fga=player_fga)
 torch.save(best_model.state_dict(), 'best_hierarchical_model.pth')
 generate_predictions(best_model, test_loader, player_df, league_df, test_seasons, athlete_names=athlete_names, player_fga=player_fga)
 
