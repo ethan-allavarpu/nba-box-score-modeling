@@ -107,12 +107,12 @@ def prepare_data(
     test_data = create_weights(test_data, weight_feature, test_seasons)
 
     # Sequences
-    train_seq = create_inout_sequences(train_data, features, response, start_index=1)
+    train_seq = create_inout_sequences(train_data, features, response, start_index=1, lag=lag)
     val_seq = create_inout_sequences(
-        val_data, features, response, start_index=val_start_index
+        val_data, features, response, start_index=val_start_index, lag=lag
     )
     test_seq = create_inout_sequences(
-        test_data, features, response, start_index=test_start_index
+        test_data, features, response, start_index=test_start_index, lag=lag
     )
 
     # Create datasets
@@ -162,6 +162,7 @@ class CausalCNNModel(nn.Module):
         kernel_size=[3, 3, 3],
         dilation=1,
         num_layers=2,
+        lag=4
     ):
         super(CausalCNNModel, self).__init__()
 
@@ -179,28 +180,14 @@ class CausalCNNModel(nn.Module):
                     padding="same",
                 )
             )
-        self.linear_layer = nn.Linear(4 * n_channels[-1], hidden_size)
-        self.fc1 = nn.Linear(hidden_size, 16)
-        self.fc2 = nn.Linear(16, 32)
-        self.fc3 = nn.Linear(32, 32)
-        self.fc4 = nn.Linear(32, 32)
-        self.fc5 = nn.Linear(32, 32)
-        self.fc6 = nn.Linear(32, 16)
-        self.fc7 = nn.Linear(16, hidden_size)
+        self.linear_layer = nn.Linear(lag * n_channels[-1] + feature_size, hidden_size)
         self.final_layer = nn.Linear(hidden_size, 1)
 
     def forward(self, x, ext_data, lengths):
         for n_pad, causal_cnn_block in zip(self.n_pad, self.causal_cnn_blocks):
             x = causal_cnn_block(x)
-        # x = torch.cat((x, ext_data), dim=1)
+        x = torch.cat((x.flatten(), ext_data.flatten()))
         x = self.activation(self.linear_layer(x.flatten()))
-        # x = self.activation(self.fc1(x))
-        # x = self.activation(self.fc2(x))
-        # x = self.activation(self.fc3(x))
-        # x = self.activation(self.fc4(x))
-        # x = self.activation(self.fc5(x))
-        # x = self.activation(self.fc6(x))
-        # x = self.activation(self.fc7(x))
 
         prediction = self.final_layer(x)
 
@@ -254,6 +241,8 @@ def hyperparameter_tuning(
         "hidden_size": 32,
         "num_layers": 2,
         "lr": 5e-4,
+        "lag": 2,
+        "features": [],
         "n_channels": [1, 5],
         "kernel_size": [3],
         "batch_size": 1,
@@ -263,7 +252,7 @@ def hyperparameter_tuning(
     if param_grid is None or not param_grid:
         # Use default hyperparameters
         param_grid = {k: [v] for k, v in default_params.items()}
-
+    
     best_model = None
     best_params = {}
     best_val_loss = float("inf")
@@ -272,11 +261,12 @@ def hyperparameter_tuning(
         param_dict = dict(zip(param_grid.keys(), params))
         print("Testing with parameters:", param_dict)
         model = CausalCNNModel(
-            feature_size=len(features),
+            feature_size=len(param_dict["features"]),
             hidden_size=param_dict["hidden_size"],
             num_layers=param_dict["num_layers"],
             n_channels=param_dict["n_channels"],
             kernel_size=param_dict["kernel_size"],
+            lag=param_dict["lag"]
         )
         optimizer = optim.Adam(model.parameters(), lr=param_dict["lr"])
 
@@ -285,9 +275,10 @@ def hyperparameter_tuning(
             train_seasons,
             val_seasons,
             test_seasons,
-            features,
+            param_dict["features"],
             response,
             weight_feature="fga",
+            lag=param_dict["lag"]
         )
         train_loader, val_loader, test_dataset = create_data_loaders(
             train_dataset,
@@ -311,27 +302,29 @@ def hyperparameter_tuning(
 
 # Function to Run the Model with Best Parameters and Save Test Predictions
 def run_and_save_predictions(
-    data, train_seasons, val_seasons, test_seasons, features, response, best_params
+    data, train_seasons, val_seasons, test_seasons, response, best_params
 ):
     train_dataset, val_dataset, test_dataset = prepare_data(
         data,
         train_seasons,
         val_seasons,
         test_seasons,
-        features,
+        best_params["features"],
         response,
         weight_feature="fga",
+        lag=best_params["lag"]
     )
     train_loader, val_loader, test_loader = create_data_loaders(
         train_dataset, val_dataset, test_dataset, batch_size=best_params["batch_size"]
     )
 
     model = CausalCNNModel(
-        feature_size=len(features),
+        feature_size=len(best_params["features"]),
         hidden_size=best_params["hidden_size"],
         num_layers=best_params["num_layers"],
         n_channels=best_params["n_channels"],
         kernel_size=best_params["kernel_size"],
+        lag=best_params["lag"]
     )
     model.load_state_dict(torch.load("best_model_cnn.pth"))
 
@@ -342,16 +335,18 @@ def run_and_save_predictions(
         for seq, ext_data, weights, labels, lengths in test_loader:
             y_pred = model(seq, ext_data, lengths)
             test_predictions += [y_pred.tolist()]
-    # Account for drift from train to val to test
-    pd.concat(
+    out = pd.concat(
         [
             data[data.season.isin(test_seasons)][
                 ["league_avg_fg3a_fga", "fga"]
             ].reset_index(drop=True),
-            pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index() - pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index().mean() + 2 * data[data.season.isin(val_seasons)].league_avg_fg3a_fga.mean() - data[data.season.isin(train_seasons)].league_avg_fg3a_fga.mean(),
+            pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index(drop=True)
         ],
-        axis=1,
-    ).to_csv("cnn_test_predictions.csv", index=False)
+        axis=1
+    )
+    # Account for drift from train to val to test
+    out["Predictions"] =  out.Predictions.shift(best_params["lag"]) - out.Predictions.mean() + 2 * data[data.season.isin(val_seasons)].league_avg_fg3a_fga.mean() - data[data.season.isin(train_seasons)].league_avg_fg3a_fga.mean()
+    out.to_csv("cnn_test_predictions.csv", index=False)
     print("Test predictions saved to 'test_predictions.csv'.")
 
 
@@ -373,19 +368,6 @@ run_and_save_predictions(
     list(range(2010, 2015)),
     list(range(2015, 2016)),
     list(range(2016, 2020)),
-    features,
     "league_avg_fg3a_fga",
-    best_params,
+    best_params
 )
-
-df_cnn = pd.read_csv("cnn_test_predictions.csv")
-
-def weighted_mse(true, pred, weights):
-    return (weights * (true - pred) ** 2).sum() / weights.sum()
-
-# Reshift to make sure predictions match same game_date
-print(np.corrcoef(df_cnn.league_avg_fg3a_fga.iloc[4:], df_cnn.Predictions[:-4]))
-print(weighted_mse(df_cnn.league_avg_fg3a_fga.iloc[4:],
-             df_cnn.Predictions[:-4],
-              df_cnn.fga.iloc[4:]
-            ))

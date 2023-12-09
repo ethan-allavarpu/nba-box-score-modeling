@@ -223,9 +223,9 @@ def hyperparameter_tuning(
 ):
     # Default hyperparameters
     default_params = {
-        "hidden_size": 32,
+        "hidden_size": 64,
         "num_layers": 2,
-        "lr": 5e-4,
+        "lr": 1e-3,
         "batch_size": 1,
         "epochs": 500,
     }
@@ -308,17 +308,18 @@ def run_and_save_predictions(
         for seq, ext_data, weights, labels, lengths in test_loader:
             y_pred = model(seq, ext_data, lengths)
             test_predictions += [y_pred.tolist()]
-    pd.concat(
+    out = pd.concat(
         [
             data[data.season.isin(test_seasons)][
                 ["league_avg_fg3a_fga", "fga"]
-            ].reset_index(),
-            pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index()
-            + data[data.season.isin(val_seasons)].league_avg_fg3a_fga.mean()
-            - data[data.season.isin(train_seasons)].league_avg_fg3a_fga.mean(),
+            ].reset_index(drop=True),
+            pd.DataFrame(test_predictions, columns=["Predictions"]).reset_index(drop=True)
         ],
-        axis=1,
-    ).to_csv("lstm_test_predictions.csv", index=False)
+        axis=1
+    )
+    # Account for drift from train to val to test
+    out["Predictions"] =  out.Predictions.shift(4) - out.Predictions.mean() + 2 * data[data.season.isin(val_seasons)].league_avg_fg3a_fga.mean() - data[data.season.isin(train_seasons)].league_avg_fg3a_fga.mean()
+    out.to_csv("lstm_test_predictions.csv", index=False)
     print("Test predictions saved to 'lstm_test_predictions.csv'.")
 
 
@@ -352,12 +353,10 @@ def weighted_mse(true, pred, weights):
     return (weights * (true - pred) ** 2).sum() / weights.sum()
 
 
-# Reshift to make sure predictions match same game_date
-print(np.corrcoef(df_lstm.league_avg_fg3a_fga.iloc[4:], df_lstm.Predictions[:-4]))
 print(
     weighted_mse(
-        df_lstm.league_avg_fg3a_fga.iloc[4:],
-        df_lstm.Predictions[:-4],
-        df_lstm.fga.iloc[4:],
+        df_lstm.league_avg_fg3a_fga.iloc[4:].reset_index(drop=True),
+        df_lstm.Predictions.iloc[4:].reset_index(drop=True),
+        df_lstm.fga.iloc[4:].reset_index(drop=True),
     )
 )
