@@ -149,8 +149,7 @@ def collate_fn(batch):
 
 # Custom Weighted MSE Loss
 def weighted_mse_loss(input, target, weight):
-    # return (weight * (input - target) ** 2).sum()
-    return ((input - target) ** 2).mean()
+    return (weight * (input - target) ** 2).sum() / weight.sum()
 
 
 # Causal CNN Model Class with Pack Padded Sequence
@@ -180,7 +179,7 @@ class CausalCNNModel(nn.Module):
                     padding="same",
                 )
             )
-        self.linear_layer = nn.Linear(4 * 5, hidden_size)
+        self.linear_layer = nn.Linear(4 * n_channels[-1], hidden_size)
         self.fc1 = nn.Linear(hidden_size, 16)
         self.fc2 = nn.Linear(16, 32)
         self.fc3 = nn.Linear(32, 32)
@@ -251,7 +250,6 @@ def evaluate_model(model, loader):
 def hyperparameter_tuning(
     data, train_seasons, val_seasons, test_seasons, features, response, param_grid=None
 ):
-    # Default hyperparameters
     default_params = {
         "hidden_size": 32,
         "num_layers": 2,
@@ -344,7 +342,7 @@ def run_and_save_predictions(
         for seq, ext_data, weights, labels, lengths in test_loader:
             y_pred = model(seq, ext_data, lengths)
             test_predictions += [y_pred.tolist()]
-
+    # Account for drift from train to val to test
     pd.concat(
         [
             data[data.season.isin(test_seasons)][
@@ -379,3 +377,14 @@ run_and_save_predictions(
     "league_avg_fg3a_fga",
     best_params,
 )
+
+df_cnn = pd.read_csv("cnn_test_predictions.csv")
+
+def weighted_mse(true, pred, weights):
+    return (weights * (true - pred) ** 2).sum() / weights.sum()
+
+print(np.corrcoef(df_cnn.league_avg_fg3a_fga.iloc[4:], df_cnn.Predictions[:-4]))
+print(weighted_mse(df_cnn.league_avg_fg3a_fga.iloc[4:],
+             df_cnn.Predictions[:-4],
+              df_cnn.fga.iloc[4:]
+            ))
