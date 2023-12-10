@@ -11,22 +11,24 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
-def fit_and_summarize_arima(league_game_df, metric, order, seasonal_order, athlete="overall"):
+def fit_and_summarize_arima(league_game_df, metric, order, athlete="overall"):
     """
     Fit ARIMA model to the entire dataset and provide a summary, including ACF and PACF plots.
 
     Args:
     league_game_df (DataFrame): The preprocessed league game data.
     """
+    time_series = league_game_df[metric]
+    time_series = time_series[~time_series.isna()]
 
     # Plot ACF and PACF
     plt.figure(figsize=(7, 7))
-    plot_acf(league_game_df[metric][~league_game_df[metric].isna()], ax=plt.gca(), lags=40)
+    plot_acf(time_series, ax=plt.gca(), lags=20)
     plt.title("Autocorrelation Function (ACF)")
     plt.savefig(f"plots/acf_{metric}_{athlete}.png", dpi=300, bbox_inches="tight")
 
     plt.figure(figsize=(7, 7))
-    plot_pacf(league_game_df[metric][~league_game_df[metric].isna()], ax=plt.gca(), lags=40, method="ywm")
+    plot_pacf(time_series, ax=plt.gca(), lags=20, method="ywm")
     plt.title("Partial Autocorrelation Function (PACF)")
     plt.savefig(f"plots/pacf_{metric}_{athlete}.png", dpi=300, bbox_inches="tight")
 
@@ -34,7 +36,7 @@ def fit_and_summarize_arima(league_game_df, metric, order, seasonal_order, athle
     exog_df = league_game_df[["days_since_last_game", "season_type"]]
     # only keep columns that have more than 1 unique value
     exog_df = exog_df.loc[:, exog_df.nunique() > 1]
-    arima_model = SARIMAX(endog=league_game_df[metric], exog=exog_df, order=order, seasonal_order=seasonal_order)
+    arima_model = ARIMA(endog=league_game_df[metric], exog=exog_df, order=order)
     arima_model_fit = arima_model.fit()
 
     # Print out the summary of the ARIMA model
@@ -42,7 +44,7 @@ def fit_and_summarize_arima(league_game_df, metric, order, seasonal_order, athle
 
 
 # Function to fit ARIMA model and make one-day out-of-sample forecast
-def fit_and_forecast(league_game_df, prediction_date, metric, order,seasonal_order, og_model):
+def fit_and_forecast(league_game_df, prediction_date, metric, order, og_model):
     """
     Fit ARIMA model to data up to a specified date and make a one-day out-of-sample forecast.
 
@@ -60,7 +62,7 @@ def fit_and_forecast(league_game_df, prediction_date, metric, order,seasonal_ord
     # only keep columns that have more than 1 unique value
     exog_df = exog_df.loc[:, exog_df.nunique() > 1]
     # Fit the ARIMA model
-    arima_model = SARIMAX(endog=fit_df[metric], exog=exog_df, order=order, seasonal_order=seasonal_order)
+    arima_model = ARIMA(endog=fit_df[metric], exog=exog_df, order=order)
 
     if og_model is not None:
         with arima_model.fix_params(dict(og_model.params)):
@@ -91,7 +93,7 @@ def main(
 
     # Fit and summarize the ARIMA model
     train_league_df = league_game_df[league_game_df["season"].isin(train_seasons)]
-    fit_and_summarize_arima(train_league_df, metric=metric, order=(4, 1, 0))
+    fit_and_summarize_arima(train_league_df, metric=metric, order=(4, 2, 0))
 
     # Store predictions in a dictionary
     predictions = {}
@@ -132,7 +134,6 @@ def player_main(
     test_seasons=range(2018, 2020),
     metric="fg3a_fga",
     league_model=None,
-    seasonal_order=(0, 0, 0, 0)
 ):
     df = player_data_loader(seasons=list(train_seasons) + list(test_seasons))
     # subset the data to the player
@@ -182,12 +183,12 @@ def player_main(
         pred_col = "Predictions"
 
     fit_and_summarize_arima(
-        df, metric=f"{athlete_name}_{metric}_delta", order=order,seasonal_order=seasonal_order, athlete=athlete_name
+        df, metric=f"{athlete_name}_{metric}_delta", order=order, athlete=athlete_name
     )
 
     max_train_date = df[df["season"].isin(train_seasons)]["game_date"].max()
     _, og_model = fit_and_forecast(
-        df, max_train_date, metric=metric, order=order,seasonal_order=seasonal_order, og_model=None
+        df, max_train_date, metric=metric, order=order, og_model=None
     )
 
     # Now fit the model and make predictions
@@ -200,7 +201,6 @@ def player_main(
             prediction_date,
             metric=f"{athlete_name}_{metric}_delta",
             order=order,
-            seasonal_order=seasonal_order,
             og_model=og_model,
         )
 
@@ -250,19 +250,19 @@ if __name__ == "__main__":
     # )
 
     # Anthony Davis
-    # player_main(athlete_name="Anthony Davis", order=(1,1,1))
+    # player_main(athlete_name="Anthony Davis", order=(0,1,1))
     # player_main(
     #     athlete_name="Anthony Davis",
-    #     order=(1, 1, 1), seasonal_order=(1, 0, 1, 7),
+    #     order=(0, 1, 1),
     #     league_model=("CNN", "cnn_test_predictions.csv"),
     # )
     # player_main(
     #     athlete_name="Anthony Davis",
-    #     order=(1, 1, 1), seasonal_order=(1, 0, 1, 7),
+    #     order=(0, 1, 1),
     #     league_model=("LSTM", "lstm_test_predictions.csv"),
     # )
     # player_main(
     #     athlete_name="Anthony Davis",
-    #     order=(1, 1, 1), seasonal_order=(1, 0, 1, 7),
+    #     order=(1, 1, 1),
     #     league_model=("Prophet", "prophet_league_avg_fg3a_fga_predictions.csv"),
     # )
