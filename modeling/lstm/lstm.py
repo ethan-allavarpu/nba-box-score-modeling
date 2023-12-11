@@ -346,17 +346,3 @@ run_and_save_predictions(
     best_params,
 )
 
-df_lstm = pd.read_csv("lstm_test_predictions.csv")
-
-
-def weighted_mse(true, pred, weights):
-    return (weights * (true - pred) ** 2).sum() / weights.sum()
-
-
-print(
-    weighted_mse(
-        df_lstm.league_avg_fg3a_fga.iloc[4:].reset_index(drop=True),
-        df_lstm.Predictions.iloc[4:].reset_index(drop=True),
-        df_lstm.fga.iloc[4:].reset_index(drop=True),
-    )
-)

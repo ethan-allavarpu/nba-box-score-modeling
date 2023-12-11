@@ -19,6 +19,9 @@ def fit_and_summarize_arima(league_game_df, metric, order, athlete="overall"):
     league_game_df (DataFrame): The preprocessed league game data.
     """
     time_series = league_game_df[metric]
+    if order[1] > 0:
+        for _ in range(order[1]):
+            time_series = time_series.diff()
     time_series = time_series[~time_series.isna()]
 
     # Plot ACF and PACF
@@ -93,7 +96,7 @@ def main(
 
     # Fit and summarize the ARIMA model
     train_league_df = league_game_df[league_game_df["season"].isin(train_seasons)]
-    fit_and_summarize_arima(train_league_df, metric=metric, order=(4, 2, 0))
+    fit_and_summarize_arima(train_league_df, metric=metric, order=(0, 3, 2))
 
     # Store predictions in a dictionary
     predictions = {}
@@ -105,7 +108,7 @@ def main(
         "game_date"
     ].max()
     _, og_model = fit_and_forecast(
-        league_game_df, max_train_date, metric=metric, order=(4, 2, 0), og_model=None
+        league_game_df, max_train_date, metric=metric, order=(0, 3, 2), og_model=None
     )
     for i in range(len(unique_dates)):
         prediction_date = unique_dates[i]  # We predict the next day
@@ -113,7 +116,7 @@ def main(
             league_game_df,
             prediction_date,
             metric=metric,
-            order=(4, 2, 0),
+            order=(0, 3, 2),
             og_model=og_model,
         )
 
